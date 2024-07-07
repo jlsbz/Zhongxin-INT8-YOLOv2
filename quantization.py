@@ -8,13 +8,18 @@ import math
 import copy
 import torch.nn.functional as F  
 from torch.nn.parameter import Parameter
+from torch.autograd import Variable
 
 import numpy as np
 
 
 def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, mode='PTQ', device='cuda', useConv2D=True, useSmooth=True):
 
-    if 'resnet' not in arch and 'ResNet' not in arch:
+    if 'resnet' in arch or 'ResNet' in arch:
+        arch = 'resnet50'
+    elif 'yolo' in arch or 'YOLO' in arch or 'Yolo' in arch:
+        arch = 'yolov2'
+    else:
         raise ValueError("Sorry, this network do not support now ") 
 
     model.eval()
@@ -23,27 +28,31 @@ def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, m
     fused_model = fuse_conv_bn(model)
     smooth_input = {}
     if useSmooth == True:
-        smoothed_model, input_scale, output_scale, residual_scale, smooth_input = smooth(fused_model, calib_image_list, alpha=0.5)
+        smoothed_model, input_scale, output_scale, residual_scale, smooth_input = smooth(arch, fused_model, calib_image_list, alpha=0.5)
         print(smoothed_model)
         # print(smoothed_model.named_modules())
         # assert()              # 替换层后model找不到，应该怎么办，明天查
         weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(smoothed_model)
         # print(weight_scale)
     else:
-        input_scale, output_scale, residual_scale = get_scales(fused_model, calib_image_list)
+        input_scale, output_scale, residual_scale = get_scales(arch, fused_model, calib_image_list)
         weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(fused_model)
+        assert()
     
     # weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(fused_model)
     
     # input_max_scale = get_input_scale(fused_model, calib_image_list)
-    input_max_scale = input_scale['conv1']
+    if arch == 'resnet50':
+        input_max_scale = input_scale['conv1']
+    elif arch =='yolov2':
+        input_max_scale = input_scale['conv1']
     
     input_scale = update_scale(weight_scale, input_scale, output_scale, input_max_scale)
 
     final_scale = 1
     for key in residual_scale:
         final_scale = residual_scale[key]
-    quantized_model, act_weight_scale = quant_module(weight_quant_model, weight_scale, input_scale, 
+    quantized_model, act_weight_scale = quant_module(arch, weight_quant_model, weight_scale, input_scale, 
                                                      output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useConv2D, useSmooth)
     quantized_model = quantized_model.to(device)
 
@@ -69,7 +78,7 @@ def smooth_conv2d(model, name):
 
 
 
-def smooth(model, calib_list, alpha=0.5):
+def smooth(arch, model, calib_list, alpha=0.5):
     model.eval()
     device = next(model.parameters()).device
     input_max = {}
@@ -674,7 +683,7 @@ def replace_bottlenecks(model, weight_scale, input_scale, output_scale, residual
 
 
 
-def replace_conv2d_to_Smooth(model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input):
+def replace_conv2d_to_Smooth(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input):
 
     for child_name, module in model.named_children():
         if 'conv' in child_name:
@@ -699,11 +708,11 @@ def replace_conv2d_to_Smooth(model, name, weight_scale, input_scale, output_scal
 #                     model._modules[child_name] = ManualConv2d(module, weight, bias_weight,
 #                                                               weight_slice=1/weight_scale[weight_string], input_slice=1/input_scale[weight_string], output_slice = 1/output_scale[weight_string], bias_slice = bias_scale[weight_string]/weight_scale[weight_string], input_max_scale = act_scale)
         else:
-            replace_conv2d_to_Smooth(module, name+'.'+child_name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
+            replace_conv2d_to_Smooth(arch, module, name+'.'+child_name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
 
 
 
-def replace_conv2d(model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d=True):
+def replace_conv2d(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d=True):
     for child_name, module in model.named_children():
         if isinstance(module, nn.Conv2d):
                 string = name+'.'+child_name
@@ -731,7 +740,7 @@ def replace_conv2d(model, name, weight_scale, input_scale, output_scale, input_m
                     model._modules[child_name] = ManualConv2d(module, weight, bias_weight,
                                                               weight_slice=1/weight_scale[weight_string], input_slice=1/input_scale[weight_string], output_slice = 1/output_scale[weight_string], bias_slice = bias_scale[weight_string]/weight_scale[weight_string], input_max_scale = act_scale)
         else:
-            replace_conv2d(module, name+'.'+child_name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
+            replace_conv2d(arch, module, name+'.'+child_name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
 
 
 def replace_Avgpool(model, name, weight_scale, input_scale, output_scale):
@@ -832,15 +841,15 @@ class ManualLinear(nn.Module):
 
 #处理bottleneck和conv的顺序
 #先处理bottleneck
-def quant_module(module: nn.Module, weight_scale, input_scale, output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useconv2d, useSmooth):
+def quant_module(arch, module: nn.Module, weight_scale, input_scale, output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useconv2d, useSmooth):
     
     scale = 1
     replace_bottlenecks(module, weight_scale, input_scale, output_scale, residual_scale, useSmooth)
     name = ''
     if useSmooth:
-        replace_conv2d_to_Smooth(module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
+        replace_conv2d_to_Smooth(arch, module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
     else:
-        replace_conv2d(module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
+        replace_conv2d(arch, module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
 
     final_scale_2 = 1
     final_scale_2 = replace_Avgpool(module, name, weight_scale, input_scale, output_scale)
@@ -1038,7 +1047,7 @@ class FusedbnLayer(nn.Module):
         return x  
 
 class QuantConv2d(nn.Module):
-    def __init__(self, conv_layer, weight_slice=1, input_slice=1, output_slice=1, bias_slice=1, input_max_scale=1):
+    def __init__(self, conv_layer, weight_slice=1, input_slice=1, output_slice=1, bias_slice=1, input_max_scale=1,final_scale=-1):
         super(QuantConv2d, self).__init__()  
         self.conv = nn.Conv2d(conv_layer.in_channels, conv_layer.out_channels,  
                               conv_layer.kernel_size, conv_layer.stride,  
@@ -1050,6 +1059,7 @@ class QuantConv2d(nn.Module):
         self.weight_slice = weight_slice
         self.bias_slice = bias_slice
         self.input_max_scale = input_max_scale
+        self.final_scale = final_scale
         self.conv.weight.data.copy_(conv_layer.weight.data)  
         if self.conv.bias is not None:  
             self.conv.bias.data.copy_(conv_layer.bias.data)  
@@ -1071,6 +1081,9 @@ class QuantConv2d(nn.Module):
         x = torch.round(x*p)
         x = x.clamp(max=127)
         x = x.clamp(min=-128)
+
+        if self.final_scale !=-1:
+            x = x *final_scale
 
         return x
          
@@ -1244,7 +1257,7 @@ def MSE_update_weight(weight, scale):
     return best_scaled_weight, best_scale
 
 
-def get_scales(model, calib_list):
+def get_scales(arch, model, calib_list):
     model.eval()
     device = next(model.parameters()).device
     input_max = {}
@@ -1261,6 +1274,8 @@ def get_scales(model, calib_list):
         if isinstance(input, tuple):
             input = input[0]
 
+        print(name)
+        print(output.shape)
         max_input_range = max(torch.max(input), abs(torch.min(input))).item()
         max_output_range = max(torch.max(output), abs(torch.min(output))).item()
         if name in input_max:
@@ -1311,12 +1326,26 @@ def get_scales(model, calib_list):
             residual_hooks.append(
                 m.register_forward_hook(functools.partial(hook_residual, name=name))
             )
+    if arch == 'resnet50':
+        with torch.no_grad():
+            for i, (images, target) in enumerate(calib_list):
+                
+                images = images.to(device)
+                output = model(images)
+    elif arch =='yolov2':
+        num_images = len(calib_list)
+        # all detections are collected into:
+        #    all_boxes[cls][image] = N x 5 array of detections in
+        #    (x1, y1, x2, y2, score)
+        # self.all_boxes = [[[] for _ in range(num_images)]
+        #                 for _ in range(len(self.labelmap))]
 
-    with torch.no_grad():
-        for i, (images, target) in enumerate(calib_list):
-            
-            images = images.to(device)
-            output = model(images)
+        for i in range(num_images):
+            im, gt, h, w = calib_list.pull_item(i)
+
+            x = Variable(im.unsqueeze(0)).to(device)
+            # forward
+            bboxes, scores, cls_inds = model(x)
 
 
     for h in hooks:
@@ -1332,6 +1361,8 @@ def get_scales(model, calib_list):
     print("Here!")
     for name, max_range in input_max.items():
         input_scale[name] = max_range*2/254
+        print(name)
+        print(input_scale)
         # input_scale[name] = MSE_update_act(input_dict[name], input_scale[name])
     for name, max_range in output_max.items():
         output_scale[name] = max_range*2/254

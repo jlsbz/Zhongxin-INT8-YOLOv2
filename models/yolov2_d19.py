@@ -168,6 +168,9 @@ class YOLOv2D19(nn.Module):
         # backbone
         feats = self.backbone(x)
 
+        print("feats!")
+        print(feats.shape)
+
         # reorg layer
         p5 = self.convsets_1(feats['layer3'])
         p4 = self.reorg(self.route_layer(feats['layer2']))
