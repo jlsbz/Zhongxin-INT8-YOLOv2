@@ -1,11 +1,12 @@
 import argparse
 import os
 import torch
-
+import quantization
 from utils.vocapi_evaluator import VOCAPIEvaluator
 from utils.cocoapi_evaluator import COCOAPIEvaluator
 from data import BaseTransform, config
 
+from data.voc0712 import VOCDetection, VOC_CLASSES
 
 
 parser = argparse.ArgumentParser(description='YOLO Detector Evaluation')
@@ -140,6 +141,24 @@ if __name__ == '__main__':
     print('Finished loading model!')
     net = net.to(device)
     
+
+    print("model:")
+    print(net)
+
+
+    dataset = VOCDetection(data_dir=data_dir, 
+                                    image_sets=[('2007', 'test')],
+                                    transform=BaseTransform(input_size)
+                                    )
+
+    
+    arch = 'YOLOV2'
+
+    int8_model = quantization.auto_quant(arch, net, calib_loader, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
+    print("Quantization finished")
+    int8_model.to(device)
+    print(int8_model)
+
     # evaluation
     with torch.no_grad():
         if args.dataset == 'voc':

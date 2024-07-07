@@ -2,6 +2,9 @@
 *.pth
 *.txt
 *.pkl
+*.xml
+*.jpg
 __pycache__
 .vscode
 det_results
+data/

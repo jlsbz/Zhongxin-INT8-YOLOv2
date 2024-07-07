@@ -145,7 +145,7 @@ class YOLOv2D19(nn.Module):
         cls_inds = cls_inds[keep]
 
         # NMS
-        keep = np.zeros(len(bboxes), dtype=np.int)
+        keep = np.zeros(len(bboxes), dtype=int)
         for i in range(self.num_classes):
             inds = np.where(cls_inds == i)[0]
             if len(inds) == 0:

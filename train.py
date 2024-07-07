@@ -66,7 +66,7 @@ def parse_args():
                         help='yolov2_d19, yolov2_r50, yolov2_slim, yolov3, yolov3_spp, yolov3_tiny')
     
     # dataset
-    parser.add_argument('-root', '--data_root', default='/mnt/share/ssd2/dataset',
+    parser.add_argument('-root', '--data_root', default='/home/yn/huawei-datafree/yolov2-yolov3_PyTorch/data',
                         help='dataset root')
     parser.add_argument('-d', '--dataset', default='voc',
                         help='voc or coco')
