@@ -146,20 +146,26 @@ if __name__ == '__main__':
     # print(net)
 
 
-    dataset = VOCDetection(data_dir=data_dir, 
+    all_dataset = VOCDetection(data_dir=data_dir, 
                                     image_sets=[('2007', 'test')],
                                     transform=BaseTransform(input_size)
                                     )
-
     
-    arch = 'YOLOV2'
+    for i in range(100):
+        if (i+1)*100 > len(all_dataset):
+            break
+        dataset = all_dataset[0:(i+1)*100]
+        print("We have {} calib sample".format(len(dataset)))
+        # with torch.no_grad():
+        #     voc_test(net, data_dir, device, input_size)
+        arch = 'YOLOV2'
 
-    int8_model = quantization.auto_quant(arch, net, dataset, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
-    print("Quantization finished")
-    int8_model.to(device)
-    # print(int8_model)
-
-    voc_test(int8_model, data_dir, device, input_size)
+        int8_model = quantization.auto_quant(arch, net, dataset, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
+        print("Quantization finished")
+        int8_model.to(device)
+        # print(int8_model)
+        with torch.no_grad():
+            voc_test(int8_model, data_dir, device, input_size)
     
     # # evaluation
     # with torch.no_grad():

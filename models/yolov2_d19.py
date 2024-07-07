@@ -168,9 +168,6 @@ class YOLOv2D19(nn.Module):
         # backbone
         feats = self.backbone(x)
 
-        print("feats!")
-
-
         # reorg layer
         p5 = self.convsets_1(feats['layer3'])
         p4 = self.reorg(self.route_layer(feats['layer2']))
@@ -281,7 +278,7 @@ class YOLOv2D19(nn.Module):
 
 
 class QuantYOLOv2D19(nn.Module):
-    def __init__(self, device, input_size=None, num_classes=20, trainable=False, conf_thresh=0.001, nms_thresh=0.5, anchor_size=None, scales = []):
+    def __init__(self, device, input_size=None, num_classes=20, trainable=False, conf_thresh=0.001, nms_thresh=0.5, anchor_size=None, scales = [1,1,1,1,1,1,1]):
         super(QuantYOLOv2D19, self).__init__()
         self.device = device
         self.input_size = input_size
@@ -311,6 +308,7 @@ class QuantYOLOv2D19(nn.Module):
         # prediction layer
         self.pred = nn.Conv2d(1024, self.num_anchors*(1 + 4 + self.num_classes), kernel_size=1)
 
+        # self.scales = [1,1,1,1,1,1,1]
         #scales = [output scale layer1, out_scale layer2, out_scale layer3, out_p4, out_p5, out_cat, final_scale/out_pred]
         self.scales = scales
         

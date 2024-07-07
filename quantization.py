@@ -37,7 +37,7 @@ def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, m
     else:
         input_scale, output_scale, residual_scale = get_scales(arch, fused_model, calib_image_list)
         weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(fused_model)
-        print(weight_quant_model)
+        # print(weight_quant_model)
         # print(input_scale)
         # print(output_scale)
         # print(weight_scale)
@@ -54,6 +54,7 @@ def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, m
     
     # input_max_scale = get_input_scale(fused_model, calib_image_list)
     if arch == 'resnet50':
+        # input_max_scale = get_input_scale(fused_model, calib_image_list)
         input_max_scale = input_scale['conv1']
         input_scale = update_scale(weight_scale, input_scale, output_scale, input_max_scale)
     elif arch =='yolov2':
@@ -68,12 +69,132 @@ def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, m
                                                      output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useConv2D, useSmooth)
     quantized_model = quantized_model.to(device)
 
+    # test_yolov2(arch, quantized_model, calib_image_list, input_scale, output_scale)
+    # assert()
     # optimized_model, optimized_scale = actscale_optimize(quantized_model, input_max_scale, weight_scale, act_weight_scale)
 
     return quantized_model
 
 
 
+def test_yolov2(arch, model, calib_list, input_scale, output_scale):
+    model.eval()
+    device = next(model.parameters()).device
+    input_max = {}
+    output_max = {}
+    intput_min = {}
+    output_min = {}
+    residual_max = {}
+    
+    # input_dict = {}
+    # output_dict = {}
+    # residual_dict ={}
+
+    def hook_function(module, input, output, name):
+        if isinstance(input, tuple):
+            input = input[0]
+        if not isinstance(input, torch.Tensor) or not isinstance(output, torch.Tensor):  
+            return
+        # print(name)
+        # print(output.shape)
+        if arch == 'resnet50':
+            max_input_range = max(torch.max(input), abs(torch.min(input))).item()
+            max_output_range = max(torch.max(output), abs(torch.min(output))).item()
+
+        elif arch =='yolov2':
+            # if isinstance(input, torch.Tensor):  
+                max_input_range = torch.max(input).item()
+            # if isinstance(output, torch.Tensor):  
+                max_output_range = torch.max(output).item()
+
+        if name in input_max:
+            input_max[name] = max(input_max[name], max_input_range)
+        else:
+            input_max[name] = max_input_range
+        if name in output_max:
+            output_max[name] = max(output_max[name], max_output_range)
+        else:
+            output_max[name] = max_output_range
+        # min_input = torch.min(input).item()
+        # min_output = torch.min(output).item()
+        # if name in intput_min:
+        #     intput_min[name] = min(min_input, intput_min[name])
+        # else:
+        #     intput_min[name] = min_input
+        # if name in output_min:
+        #     output_min[name] = min(min_output, output_min[name])
+        # else:
+        #     output_min[name] = min_output
+        
+        # if name not in input_dict:
+        #     input_dict[name] = []
+        # input_dict[name].append(input.cpu())     # many GPU memory used
+        # if name not in output_dict:
+        #     output_dict[name] = []
+        # output_dict[name].append(output.cpu())
+        
+        # if name not in residual_dict:
+        #     residual_dict[name] = []
+        # residual_dict[name].append(output.cpu())
+        
+    
+    hooks = []
+    for name, m in model.named_modules():
+        hooks.append(
+                m.register_forward_hook(functools.partial(hook_function, name=name))
+            )
+
+    if arch == 'resnet50':
+        with torch.no_grad():
+            for i, (images, target) in enumerate(calib_list):
+                
+                images = images.to(device)
+                output = model(images)
+    elif arch =='yolov2':
+        num_images = len(calib_list)
+
+        for i in range(num_images):
+            im, gt, h, w = calib_list.pull_item(i)
+
+            x = Variable(im.unsqueeze(0)).to(device)
+            # forward
+            bboxes, scores, cls_inds = model(x)
+            break
+            if i == 100:
+                break
+
+
+    for h in hooks:
+        h.remove()
+    # for h in residual_hooks:
+    #     h.remove()
+    
+
+    # input_scale = {}
+    # output_scale = {}
+    # residual_scale = {}
+
+    print("Start!")
+    print("Input!")
+        # input_scale[name] = MSE_update_act(input_dict[name], input_scale[name])
+    for name, max_range in input_max.items():
+        # output_scale[name] = max_range*2/254
+        print(name)
+        print(max_range)
+        if name in input_scale:
+            print("the resume is :")
+            print(max_range*input_scale[name])
+    print("Output!")
+    for name, max_range in output_max.items():
+        # output_scale[name] = max_range*2/254
+        print(name)
+        print(max_range)
+        if name in output_scale:
+            print("the resume is :")
+            print(max_range*output_scale[name])
+        # output_scale[name] = MSE_update_act(output_dict[name], output_scale[name])
+    
+    return
 
 def smooth_conv2d(model, name):
     for child_name, module in model.named_children():
@@ -727,9 +848,11 @@ def replace_conv2d_to_Smooth(arch, model, name, weight_scale, input_scale, outpu
 def replace_conv2d(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d=True):
     for child_name, module in model.named_children():
         if isinstance(module, nn.Conv2d):
+                # print("eeeeeeeeee")
                 string = name+'.'+child_name
                 string = string[1:]
                 weight_string = string
+                # print(string)
                 if module.weight.is_cuda:  
                     weight = module.weight.cpu() 
                 else:
@@ -741,7 +864,9 @@ def replace_conv2d(arch, model, name, weight_scale, input_scale, output_scale, i
                 weight = weight.detach().numpy()
                 bias_weight = bias_weight.detach().numpy()
                 act_scale = 1
-                if string == 'conv1':
+                if arch == 'resnet50' and string == 'conv1':
+                    act_scale = input_max_scale
+                elif arch == 'yolov2' and string == 'backbone.conv_1.0.convs.0':
                     act_scale = input_max_scale
                 if useconv2d:
                     scaled_conv2d = QuantConv2d(module, weight_slice=1/weight_scale[weight_string], 
@@ -872,9 +997,9 @@ def quant_module(arch, model: nn.Module, weight_scale, input_scale, output_scale
     elif arch =='yolov2':
         #scales = [output scale layer1, out_scale layer2, out_scale layer3, out_p4, out_p5, out_cat, final_scale/out_pred]
         scales = [1,1,1,1,1,1,1]
-        
-        scales[3] = output_scale['convsets_1']
-        scales[4] = output_scale['reorg']
+
+        scales[3] = output_scale['reorg']
+        scales[4] = output_scale['convsets_1']
         scales[5] = input_scale['convsets_2']
         scales[6] = output_scale['pred']
 
@@ -1114,10 +1239,17 @@ class QuantConv2d(nn.Module):
 
     def forward(self, input_data):
         if self.input_max_scale != 1:
+            # print(input_data)
+            
+            # print(self.input_max_scale)
             s = 1/self.input_max_scale
+            # print(s)
             input_data = torch.round(input_data*s)
             input_data = input_data.clamp(max=127)
             input_data = input_data.clamp(min=-128)
+            # print("nm")
+            # print(max(input_data))
+        # print()
 
         # input_data = input_data*s
         x = self.conv(input_data)
@@ -1125,12 +1257,17 @@ class QuantConv2d(nn.Module):
         p = self.output_slice / (self.input_slice * self.weight_slice)
         
         x = torch.round(x*p)
+        # print(torch.max(x), torch.min(x))
+        # print(torch.max(x/self.output_slice), torch.min(x/self.output_slice))
+
         x = x.clamp(max=127)
         x = x.clamp(min=-128)
 
-        if self.final_scale !=-1:
-            x = x *final_scale
-
+        # if self.final_scale !=-1:
+        #     x = x *self.final_scale
+        # print(torch.max(x), torch.min(x))
+        # print("??///")
+        # assert()
         return x
          
 class ManualConv2d(nn.Module):  
@@ -1396,7 +1533,6 @@ def get_scales(arch, model, calib_list):
             x = Variable(im.unsqueeze(0)).to(device)
             # forward
             bboxes, scores, cls_inds = model(x)
-            break
 
 
     for h in hooks:
@@ -1410,11 +1546,17 @@ def get_scales(arch, model, calib_list):
     residual_scale = {}
 
     print("Here!")
+    print("input!")
     for name, max_range in input_max.items():
         input_scale[name] = max_range*2/254
+        print(name)
+        print(max_range)
         # input_scale[name] = MSE_update_act(input_dict[name], input_scale[name])
+    print("output!")
     for name, max_range in output_max.items():
         output_scale[name] = max_range*2/254
+        print(name)
+        print(max_range)
         # output_scale[name] = MSE_update_act(output_dict[name], output_scale[name])
     for name, max_range in residual_max.items():
         residual_scale[name] = max_range*2/254
@@ -1455,36 +1597,36 @@ def MSE_update_act(origin_calib, scale):
     
     return  best_scale
 
-def MSE_update_weight(weight, scale):
-    best_scaled_weight = weight
-    best_scale = scale
-    best_mse = -1
-    start = 0.5
-    stop = 1.1
-    step = 0.001
-    scale_range = np.arange(start, stop + step, step) 
+# def MSE_update_weight(weight, scale):
+#     best_scaled_weight = weight
+#     best_scale = scale
+#     best_mse = -1
+#     start = 1
+#     stop = 1
+#     step = 0.001
+#     scale_range = np.arange(start, stop + step, step) 
 
-    for temp in scale_range:
-        temp_scale = scale * temp
-        quantized_weight = torch.round(weight / temp_scale)
-        quantized_weight = quantized_weight.clamp(max=127)
-        quantized_weight = quantized_weight.clamp(min=-128)
-        quantized_weight = quantized_weight * temp_scale
-        mse = torch.mean((weight - quantized_weight) ** 2)
-        if best_mse == -1:
-            best_mse = mse
-            best_scale = temp_scale
-        else:
-            if mse < best_mse:
-                best_mse = mse
-                best_scale = temp_scale
+#     for temp in scale_range:
+#         temp_scale = scale * temp
+#         quantized_weight = torch.round(weight / temp_scale)
+#         quantized_weight = quantized_weight.clamp(max=127)
+#         quantized_weight = quantized_weight.clamp(min=-128)
+#         quantized_weight = quantized_weight * temp_scale
+#         mse = torch.mean((weight - quantized_weight) ** 2)
+#         if best_mse == -1:
+#             best_mse = mse
+#             best_scale = temp_scale
+#         else:
+#             if mse < best_mse:
+#                 best_mse = mse
+#                 best_scale = temp_scale
     
-    # print("Best new scale is {}".format(best_scale/scale))
-    best_scaled_weight = torch.round(weight / best_scale)
-    best_scaled_weight = best_scaled_weight.clamp(max=127)
-    best_scaled_weight = best_scaled_weight.clamp(min=-128)
+#     # print("Best new scale is {}".format(best_scale/scale))
+#     best_scaled_weight = torch.round(weight / best_scale)
+#     best_scaled_weight = best_scaled_weight.clamp(max=127)
+#     best_scaled_weight = best_scaled_weight.clamp(min=-128)
 
-    return best_scaled_weight, best_scale
+#     return best_scaled_weight, best_scale
 
 
 
