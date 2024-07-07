@@ -152,18 +152,21 @@ if __name__ == '__main__':
                                     )
 
     
-    arch = 'YOLOV2'
+    # arch = 'YOLOV2'
 
-    int8_model = quantization.auto_quant(arch, net, calib_loader, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
-    print("Quantization finished")
-    int8_model.to(device)
-    print(int8_model)
-
-    # evaluation
-    with torch.no_grad():
-        if args.dataset == 'voc':
-            voc_test(net, data_dir, device, input_size)
-        elif args.dataset == 'coco-val':
-            coco_test(net, data_dir, device, input_size, test=False)
-        elif args.dataset == 'coco-test':
-            coco_test(net, data_dir, device, input_size, test=True)
+    # int8_model = quantization.auto_quant(arch, net, calib_loader, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
+    # print("Quantization finished")
+    # int8_model.to(device)
+    # print(int8_model)
+    fused_model = quantization.fuse_conv_bn(net)
+    voc_test(net, data_dir, device, input_size)
+    
+    
+    # # evaluation
+    # with torch.no_grad():
+    #     if args.dataset == 'voc':
+    #         voc_test(net, data_dir, device, input_size)
+    #     elif args.dataset == 'coco-val':
+    #         coco_test(net, data_dir, device, input_size, test=False)
+    #     elif args.dataset == 'coco-test':
+    #         coco_test(net, data_dir, device, input_size, test=True)
