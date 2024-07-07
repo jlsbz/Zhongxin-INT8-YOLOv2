@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import functools
 from functools import partial
-import torchvision.models as models
-import torch.ao.quantization
+# import torchvision.models as models
+# import torch.ao.quantization
 import math
 import copy
 import torch.nn.functional as F  
@@ -37,17 +37,29 @@ def auto_quant(arch, model, calib_image_list, precision='INT8', acc_loss=0.01, m
     else:
         input_scale, output_scale, residual_scale = get_scales(arch, fused_model, calib_image_list)
         weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(fused_model)
-        assert()
+        print(weight_quant_model)
+        # print(input_scale)
+        # print(output_scale)
+        # print(weight_scale)
+        # print(bias_scale)
+        # print("output")
+        # for name, scale in output_scale.items():
+        #     print(name, scale)
+        # print("weight")
+        # for name, scale in weight_scale.items():
+        #     print(name, scale)
+        # assert()
     
     # weight_quant_model, weight_scale, bias_scale = get_weight_scale_and_quant(fused_model)
     
     # input_max_scale = get_input_scale(fused_model, calib_image_list)
     if arch == 'resnet50':
         input_max_scale = input_scale['conv1']
+        input_scale = update_scale(weight_scale, input_scale, output_scale, input_max_scale)
     elif arch =='yolov2':
-        input_max_scale = input_scale['conv1']
+        input_max_scale = input_scale['backbone.conv_1.0.convs.0']
     
-    input_scale = update_scale(weight_scale, input_scale, output_scale, input_max_scale)
+    
 
     final_scale = 1
     for key in residual_scale:
@@ -841,23 +853,57 @@ class ManualLinear(nn.Module):
 
 #处理bottleneck和conv的顺序
 #先处理bottleneck
-def quant_module(arch, module: nn.Module, weight_scale, input_scale, output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useconv2d, useSmooth):
+def quant_module(arch, model: nn.Module, weight_scale, input_scale, output_scale, residual_scale, input_max_scale, final_scale, bias_scale, smooth_input, useconv2d, useSmooth):
     
     scale = 1
-    replace_bottlenecks(module, weight_scale, input_scale, output_scale, residual_scale, useSmooth)
-    name = ''
-    if useSmooth:
-        replace_conv2d_to_Smooth(arch, module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
-    else:
-        replace_conv2d(arch, module, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
+    if arch =='resnet50':
+        replace_bottlenecks(model, weight_scale, input_scale, output_scale, residual_scale, useSmooth)
+        name = ''
+        if useSmooth:
+            replace_conv2d_to_Smooth(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
+        else:
+            replace_conv2d(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
 
-    final_scale_2 = 1
-    final_scale_2 = replace_Avgpool(module, name, weight_scale, input_scale, output_scale)
-    final_scale = final_scale_2 * final_scale
-    replace_Linear(module, weight_scale, input_scale, output_scale, bias_scale, final_scale)
+        final_scale_2 = 1
+        final_scale_2 = replace_Avgpool(model, name, weight_scale, input_scale, output_scale)
+        final_scale = final_scale_2 * final_scale
+        replace_Linear(model, weight_scale, input_scale, output_scale, bias_scale, final_scale)
     
+    elif arch =='yolov2':
+        #scales = [output scale layer1, out_scale layer2, out_scale layer3, out_p4, out_p5, out_cat, final_scale/out_pred]
+        scales = [1,1,1,1,1,1,1]
+        
+        scales[3] = output_scale['convsets_1']
+        scales[4] = output_scale['reorg']
+        scales[5] = input_scale['convsets_2']
+        scales[6] = output_scale['pred']
+
+        model = replace_yolov2model(model,scales)
+        name = ''
+        if useSmooth:
+            replace_conv2d_to_Smooth(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, smooth_input)
+        else:
+            replace_conv2d(arch, model, name, weight_scale, input_scale, output_scale, input_max_scale, bias_scale, useconv2d)
     
-    return module, scale
+    return model, scale
+    
+
+def replace_yolov2model(model, scales):
+
+
+    from models.yolov2_d19 import QuantYOLOv2D19 as yolo_net
+    new_model = yolo_net(device=model.device, 
+                   input_size=model.input_size, 
+                   num_classes=model.num_classes, 
+                   trainable=model.trainable, 
+                   anchor_size=model.anchor_size,
+                   scales=scales)
+    new_model = fuse_conv_bn(new_model)
+    # print(new_model)
+    # load net
+    new_model.load_state_dict(model.state_dict(), strict=False)
+
+    return new_model
     
 
 
@@ -1273,11 +1319,20 @@ def get_scales(arch, model, calib_list):
     def hook_function(module, input, output, name):
         if isinstance(input, tuple):
             input = input[0]
+        if not isinstance(input, torch.Tensor) or not isinstance(output, torch.Tensor):  
+            return
+        # print(name)
+        # print(output.shape)
+        if arch == 'resnet50':
+            max_input_range = max(torch.max(input), abs(torch.min(input))).item()
+            max_output_range = max(torch.max(output), abs(torch.min(output))).item()
 
-        print(name)
-        print(output.shape)
-        max_input_range = max(torch.max(input), abs(torch.min(input))).item()
-        max_output_range = max(torch.max(output), abs(torch.min(output))).item()
+        elif arch =='yolov2':
+            # if isinstance(input, torch.Tensor):  
+                max_input_range = torch.max(input).item()
+            # if isinstance(output, torch.Tensor):  
+                max_output_range = torch.max(output).item()
+
         if name in input_max:
             input_max[name] = max(input_max[name], max_input_range)
         else:
@@ -1286,16 +1341,16 @@ def get_scales(arch, model, calib_list):
             output_max[name] = max(output_max[name], max_output_range)
         else:
             output_max[name] = max_output_range
-        min_input = torch.min(input).item()
-        min_output = torch.min(output).item()
-        if name in intput_min:
-            intput_min[name] = min(min_input, intput_min[name])
-        else:
-            intput_min[name] = min_input
-        if name in output_min:
-            output_min[name] = min(min_output, output_min[name])
-        else:
-            output_min[name] = min_output
+        # min_input = torch.min(input).item()
+        # min_output = torch.min(output).item()
+        # if name in intput_min:
+        #     intput_min[name] = min(min_input, intput_min[name])
+        # else:
+        #     intput_min[name] = min_input
+        # if name in output_min:
+        #     output_min[name] = min(min_output, output_min[name])
+        # else:
+        #     output_min[name] = min_output
         
         # if name not in input_dict:
         #     input_dict[name] = []
@@ -1334,11 +1389,6 @@ def get_scales(arch, model, calib_list):
                 output = model(images)
     elif arch =='yolov2':
         num_images = len(calib_list)
-        # all detections are collected into:
-        #    all_boxes[cls][image] = N x 5 array of detections in
-        #    (x1, y1, x2, y2, score)
-        # self.all_boxes = [[[] for _ in range(num_images)]
-        #                 for _ in range(len(self.labelmap))]
 
         for i in range(num_images):
             im, gt, h, w = calib_list.pull_item(i)
@@ -1346,6 +1396,7 @@ def get_scales(arch, model, calib_list):
             x = Variable(im.unsqueeze(0)).to(device)
             # forward
             bboxes, scores, cls_inds = model(x)
+            break
 
 
     for h in hooks:
@@ -1361,8 +1412,6 @@ def get_scales(arch, model, calib_list):
     print("Here!")
     for name, max_range in input_max.items():
         input_scale[name] = max_range*2/254
-        print(name)
-        print(input_scale)
         # input_scale[name] = MSE_update_act(input_dict[name], input_scale[name])
     for name, max_range in output_max.items():
         output_scale[name] = max_range*2/254

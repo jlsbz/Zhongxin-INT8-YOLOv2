@@ -142,8 +142,8 @@ if __name__ == '__main__':
     net = net.to(device)
     
 
-    print("model:")
-    print(net)
+    # print("model:")
+    # print(net)
 
 
     dataset = VOCDetection(data_dir=data_dir, 
@@ -157,7 +157,7 @@ if __name__ == '__main__':
     int8_model = quantization.auto_quant(arch, net, dataset, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
     print("Quantization finished")
     int8_model.to(device)
-    print(int8_model)
+    # print(int8_model)
 
     voc_test(int8_model, data_dir, device, input_size)
     
