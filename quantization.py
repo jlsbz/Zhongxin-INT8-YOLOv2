@@ -1533,7 +1533,8 @@ def get_scales(arch, model, calib_list):
             x = Variable(im.unsqueeze(0)).to(device)
             # forward
             bboxes, scores, cls_inds = model(x)
-
+            # if i == 200:
+            #     break
 
     for h in hooks:
         h.remove()

@@ -557,6 +557,8 @@ def quantcat(p4, p5, p4_out_scale, p5_out_scale, cat_out_scale):
     p5 = p5*p5_out_scale
     p5 = torch.cat([p4, p5], dim=1)
 
-    p5 = p5/cat_out_scale
+    p5 = torch.round(p5/cat_out_scale)
+    p5 = p5.clamp(max=127)
+    p5 = p5.clamp(min=-128)
 
     return p5
