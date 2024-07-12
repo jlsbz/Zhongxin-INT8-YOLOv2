@@ -441,6 +441,9 @@ def train(net, args, cfg, device):
                    num_classes=num_classes, 
                    trainable=True, 
                    anchor_size=anchor_size)
+    
+    net.load_state_dict(torch.load(args.trained_model, map_location=device))
+    
     model = net
     model = model.to(device).train()
 

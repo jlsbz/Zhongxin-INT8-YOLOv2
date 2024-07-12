@@ -981,6 +981,8 @@ class QuantQAT_YOLOv2D19(nn.Module):
         # pred
         pred = self.pred(p5)
 
+        pred = pred * self.scales[6]
+
         return pred  
 
 

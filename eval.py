@@ -35,9 +35,8 @@ def voc_test(model, data_dir, device, input_size):
                                 device=device,
                                 transform=BaseTransform(input_size),
                                 display=True)
-
     # VOC evaluation
-    evaluator.evaluate(model,input_size)
+    map = evaluator.evaluate(model,input_size)
 
 
 # def coco_test(model, data_dir, device, input_size, test=False):
