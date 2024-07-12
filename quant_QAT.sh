@@ -1,0 +1,1 @@
+python QAT_eval.py -d voc --cuda -v yolov2_d19 --trained_model /cephfs/yn/yn/YOLOv2-pretrained/detection/voc/yolov2_d19/yolov2_d19_77.1_78.1.pth --root /cephfs/yn/yn/YOLOv2-dataset 

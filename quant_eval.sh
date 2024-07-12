@@ -1,1 +1,1 @@
-python eval.py -d voc --cuda -v yolov2_d19 --trained_model /home/yn/huawei-datafree/yolov2-yolov3_PyTorch/pretrained_model/detection/voc/yolov2_d19/yolov2_d19_77.1_78.1.pth --root /home/yn/huawei-datafree/yolov2-yolov3_PyTorch/data
+python eval.py -d voc --cuda -v yolov2_d19 --trained_model /cephfs/yn/yn/YOLOv2-pretrained/detection/voc/yolov2_d19/yolov2_d19_77.1_78.1.pth --root /cephfs/yn/yn/YOLOv2-dataset 

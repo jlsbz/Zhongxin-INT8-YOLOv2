@@ -3,7 +3,7 @@ import os
 import torch
 import quantization
 from utils.vocapi_evaluator import VOCAPIEvaluator
-from utils.cocoapi_evaluator import COCOAPIEvaluator
+# from utils.cocoapi_evaluator import COCOAPIEvaluator
 from utils.augmentations import SSDAugmentation, ColorAugmentation
 from data import BaseTransform, config
 
@@ -37,33 +37,33 @@ def voc_test(model, data_dir, device, input_size):
                                 display=True)
 
     # VOC evaluation
-    evaluator.evaluate(model)
+    evaluator.evaluate(model,input_size)
 
 
-def coco_test(model, data_dir, device, input_size, test=False):
-    if test:
-        # test-dev
-        print('test on test-dev 2017')
-        evaluator = COCOAPIEvaluator(
-                        data_dir=data_dir,
-                        img_size=input_size,
-                        device=device,
-                        testset=True,
-                        transform=BaseTransform(input_size)
-                        )
+# def coco_test(model, data_dir, device, input_size, test=False):
+#     if test:
+#         # test-dev
+#         print('test on test-dev 2017')
+#         evaluator = COCOAPIEvaluator(
+#                         data_dir=data_dir,
+#                         img_size=input_size,
+#                         device=device,
+#                         testset=True,
+#                         transform=BaseTransform(input_size)
+#                         )
 
-    else:
-        # eval
-        evaluator = COCOAPIEvaluator(
-                        data_dir=data_dir,
-                        img_size=input_size,
-                        device=device,
-                        testset=False,
-                        transform=BaseTransform(input_size)
-                        )
+#     else:
+#         # eval
+#         evaluator = COCOAPIEvaluator(
+#                         data_dir=data_dir,
+#                         img_size=input_size,
+#                         device=device,
+#                         testset=False,
+#                         transform=BaseTransform(input_size)
+#                         )
 
-    # COCO evaluation
-    evaluator.evaluate(model)
+#     # COCO evaluation
+#     evaluator.evaluate(model)
 
 
 if __name__ == '__main__':
@@ -126,8 +126,8 @@ if __name__ == '__main__':
         exit(0)
 
     # input size
-    input_size = args.input_size
-
+    input_size = args.input_size    
+    from models.yolov2_d19 import YOLOv2D19_QAT as yolo_net
     # build model
     anchor_size = cfg['anchor_size_voc'] if args.dataset == 'voc' else cfg['anchor_size_coco']
     net = yolo_net(device=device, 
@@ -141,8 +141,10 @@ if __name__ == '__main__':
     net.eval()
     print('Finished loading model!')
     net = net.to(device)
-    
 
+    print("Before PTQ")
+    # with torch.no_grad():
+    #     voc_test(net, data_dir, device, input_size)
     # print("model:")
     # print(net)
 
@@ -167,7 +169,7 @@ if __name__ == '__main__':
         #     voc_test(net, data_dir, device, input_size)
     arch = 'YOLOV2'
 
-    int8_model = quantization.auto_quant(arch, net, train_dataset, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
+    int8_model = quantization.auto_quant(arch, net, dataset, precision='INT8', acc_loss = 0.01, mode = 'PTQ', device=device, useConv2D=True, useSmooth=False)
     print("Quantization finished")
     int8_model.to(device)
     # print(int8_model)

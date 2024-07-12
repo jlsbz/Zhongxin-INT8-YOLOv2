@@ -159,7 +159,6 @@ def test_yolov2(arch, model, calib_list, input_scale, output_scale):
             x = Variable(im.unsqueeze(0)).to(device)
             # forward
             bboxes, scores, cls_inds = model(x)
-            break
             if i == 100:
                 break
 
@@ -1016,7 +1015,7 @@ def quant_module(arch, model: nn.Module, weight_scale, input_scale, output_scale
 def replace_yolov2model(model, scales):
 
 
-    from models.yolov2_d19 import QuantYOLOv2D19 as yolo_net
+    from models.yolov2_d19 import QuantQAT_YOLOv2D19 as yolo_net
     new_model = yolo_net(device=model.device, 
                    input_size=model.input_size, 
                    num_classes=model.num_classes, 
@@ -1532,9 +1531,9 @@ def get_scales(arch, model, calib_list):
 
             x = Variable(im.unsqueeze(0)).to(device)
             # forward
-            bboxes, scores, cls_inds = model(x)
-            # if i == 200:
-            #     break
+            model(x)
+            if i == 100:
+                break
 
     for h in hooks:
         h.remove()

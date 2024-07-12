@@ -12,7 +12,7 @@ import time
 import numpy as np
 import pickle
 import xml.etree.ElementTree as ET
-
+from models.yolov2_d19 import train_output, eval_output
 
 class VOCAPIEvaluator():
     """ VOC AP Evaluation class """
@@ -39,7 +39,7 @@ class VOCAPIEvaluator():
                                     transform=transform
                                     )
 
-    def evaluate(self, net):
+    def evaluate(self, net, input_size=416):
         net.eval()
         num_images = len(self.dataset)
         # all detections are collected into:
@@ -57,7 +57,8 @@ class VOCAPIEvaluator():
             x = Variable(im.unsqueeze(0)).to(self.device)
             t0 = time.time()
             # forward
-            bboxes, scores, cls_inds = net(x)
+            pred = net(x)
+            bboxes, scores, cls_inds = eval_output(pred, input_size)
             detect_time = time.time() - t0
             scale = np.array([[w, h, w, h]])
             bboxes *= scale
